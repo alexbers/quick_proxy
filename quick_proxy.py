@@ -75,8 +75,8 @@ class Proxy(Thread):
             proxy.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             proxy.bind(("0.0.0.0", self.listen_port))
 
-        want_read = []
-        want_write = []
+        want_read = set([])
+        want_write = set([])
 
         data_to_send = {}
         client_sockets = set()
@@ -86,12 +86,12 @@ class Proxy(Thread):
         socket_to_dumper = {}
 
         proxy.listen(10)
-        want_read.append(proxy)
+        want_read.add(proxy)
 
         while True:
             # clean up the client sockets that are not want to read or write
-            client_sockets &= set(want_read + want_write)
-            server_sockets &= set(want_read + want_write)
+            client_sockets &= want_read | want_write
+            server_sockets &= want_read | want_write
 
             vaild_sockets = client_sockets | server_sockets
             # clean up closed socket-pairs
@@ -159,8 +159,8 @@ class Proxy(Thread):
                 client_sockets.add(client)
                 server_sockets.add(server)
 
-                want_read.append(client)
-                want_read.append(server)
+                want_read.add(client)
+                want_read.add(server)
 
                 print("Connect to port %s from %s" %
                       (self.listen_port, address))
@@ -179,7 +179,7 @@ class Proxy(Thread):
                     if s in server_sockets:
                         socket_to_dumper[s].dump(data)
                     data_to_send[s_pair] += data
-                    want_write.append(s_pair)
+                    want_write.add(s_pair)
                 else:  # connection was closed
                     want_read.remove(s)  # don't want to read from it
                     if s_pair in want_read:
@@ -187,7 +187,7 @@ class Proxy(Thread):
 
                     if s in server_sockets and data_to_send[s_pair]:
                         closed_but_data_left_sockets.add(s_pair)
-                        want_write.append(s_pair)
+                        want_write.add(s_pair)
                         s_pair.shutdown(socket.SHUT_RD)
                     else:
                         s_pair.close()
