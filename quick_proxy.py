@@ -75,24 +75,16 @@ class Proxy(Thread):
             proxy.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             proxy.bind(("0.0.0.0", self.listen_port))
 
-        want_read = set([])
-        want_write = set([])
-
-        data_to_send = {}
         client_sockets = set()
         server_sockets = set()
-        closed_but_data_left_sockets = set()
         socket_pairs = SocketPairs()
+        closed_but_data_left_sockets = set()
+        data_to_send = {}
         socket_to_dumper = {}
 
         proxy.listen(10)
-        want_read.add(proxy)
 
         while True:
-            # clean up the client sockets that are not want to read or write
-            client_sockets &= want_read | want_write
-            server_sockets &= want_read | want_write
-
             vaild_sockets = client_sockets | server_sockets
             # clean up closed socket-pairs
             for s in list(socket_pairs.pairs):
@@ -104,6 +96,7 @@ class Proxy(Thread):
 
             # clean up unused datas to send
             vaild_sockets = socket_pairs.pairs
+
             for s in list(data_to_send):
                 if s not in vaild_sockets:
                     del data_to_send[s]
@@ -113,21 +106,30 @@ class Proxy(Thread):
                     del socket_to_dumper[s]
 
             try:
+                want_read = set([proxy]) | client_sockets | server_sockets
+                want_write = set(data_to_send) | closed_but_data_left_sockets
+
                 ready_read, ready_write = select(want_read, want_write,
                                                  [], 10)[:2]
             except:
                 # clean up bad want_read's and want_write's fd
-                for s in list(want_read):
+                for s in want_read:
                     try:
                         select([s], [], [], 0)
                     except:
-                        want_read.remove(s)
+                        if s in server_sockets:
+                            server_sockets.remove(s)
+                        if s in client_sockets:
+                            client_sockets.remove(s)
 
-                for s in list(want_write):
+                for s in want_write:
                     try:
                         select([], [s], [], 0)
                     except:
-                        want_write.remove(s)
+                        if s in server_sockets:
+                            server_sockets.remove(s)
+                        if s in client_sockets:
+                            client_sockets.remove(s)
                 continue
 
             # handling a new connect to the proxy
@@ -151,16 +153,10 @@ class Proxy(Thread):
 
                 socket_to_dumper[server] = Dumper(self.listen_port)
 
-                data_to_send[client] = b''
-                data_to_send[server] = b''
-
                 socket_pairs.add_pair(client, server)
 
                 client_sockets.add(client)
                 server_sockets.add(server)
-
-                want_read.add(client)
-                want_read.add(server)
 
                 print("Connect to port %s from %s" %
                       (self.listen_port, address))
@@ -169,6 +165,10 @@ class Proxy(Thread):
                 if s == proxy:
                     continue  # handled above
                 s_pair = socket_pairs.get_pair(s)
+
+                if s_pair not in data_to_send:
+                    data_to_send[s_pair] = b''
+
                 try:
                     data = s.recv(65536)
                 except:
@@ -179,15 +179,9 @@ class Proxy(Thread):
                     if s in server_sockets:
                         socket_to_dumper[s].dump(data)
                     data_to_send[s_pair] += data
-                    want_write.add(s_pair)
                 else:  # connection was closed
-                    want_read.remove(s)  # don't want to read from it
-                    if s_pair in want_read:
-                        want_read.remove(s_pair)
-
                     if s in server_sockets and data_to_send[s_pair]:
                         closed_but_data_left_sockets.add(s_pair)
-                        want_write.add(s_pair)
                         s_pair.shutdown(socket.SHUT_RD)
                     else:
                         s_pair.close()
@@ -197,10 +191,9 @@ class Proxy(Thread):
 
             for s in ready_write:
                 if not data_to_send[s]:
-                    want_write.remove(s)
+                    del data_to_send[s]
                     if s in closed_but_data_left_sockets:
                         closed_but_data_left_sockets.remove(s)
-                        del data_to_send[s]
                         s.close()
                     break
 
@@ -214,6 +207,8 @@ class Proxy(Thread):
                     socket_to_dumper[s].dump(data_to_send[s][:sent])
 
                 data_to_send[s] = data_to_send[s][sent:]
+                if not data_to_send[s]:
+                    del data_to_send[s]
 
 for listen_port, sockaddr in PROXYMAPS.items():
     server_host, server_port = sockaddr
