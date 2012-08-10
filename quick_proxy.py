@@ -107,7 +107,8 @@ class Proxy(Thread):
 
             try:
                 want_read = set([proxy]) | client_sockets | server_sockets
-                want_write = set(data_to_send) | closed_but_data_left_sockets
+                out_data_ready = [s for s in data_to_send if data_to_send[s]]
+                want_write = set(out_data_ready) | closed_but_data_left_sockets
 
                 ready_read, ready_write = select(want_read, want_write,
                                                  [], 10)[:2]
@@ -155,6 +156,9 @@ class Proxy(Thread):
 
                 socket_pairs.add_pair(client, server)
 
+                data_to_send[client] = b''
+                data_to_send[server] = b''
+
                 client_sockets.add(client)
                 server_sockets.add(server)
 
@@ -165,9 +169,6 @@ class Proxy(Thread):
                 if s == proxy:
                     continue  # handled above
                 s_pair = socket_pairs.get_pair(s)
-
-                if s_pair not in data_to_send:
-                    data_to_send[s_pair] = b''
 
                 try:
                     data = s.recv(65536)
@@ -191,7 +192,6 @@ class Proxy(Thread):
 
             for s in ready_write:
                 if not data_to_send[s]:
-                    del data_to_send[s]
                     if s in closed_but_data_left_sockets:
                         closed_but_data_left_sockets.remove(s)
                         s.close()
@@ -207,8 +207,6 @@ class Proxy(Thread):
                     socket_to_dumper[s].dump(data_to_send[s][:sent])
 
                 data_to_send[s] = data_to_send[s][sent:]
-                if not data_to_send[s]:
-                    del data_to_send[s]
 
 for listen_port, sockaddr in PROXYMAPS.items():
     server_host, server_port = sockaddr
