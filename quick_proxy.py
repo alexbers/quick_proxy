@@ -2,7 +2,7 @@
 
 import socket
 import errno
-import time
+from time import sleep
 from threading import Thread
 from glob import glob
 from select import select
@@ -130,8 +130,8 @@ class Proxy(Thread):
                         want_write.remove(s)
                 continue
 
+            # handling a new connect to the proxy
             if proxy in ready_read:
-                # there was a new connect to proxy
                 client, address = proxy.accept()
                 client.setblocking(0)
 
@@ -191,17 +191,17 @@ class Proxy(Thread):
                         s_pair.shutdown(socket.SHUT_RD)
                     else:
                         s_pair.close()
+
                     s.close()
                     break
 
             for s in ready_write:
                 if not data_to_send[s]:
+                    want_write.remove(s)
                     if s in closed_but_data_left_sockets:
+                        closed_but_data_left_sockets.remove(s)
                         del data_to_send[s]
                         s.close()
-                        closed_but_data_left_sockets.remove(s)
-
-                    want_write.remove(s)
                     break
 
                 try:
@@ -222,4 +222,4 @@ for listen_port, sockaddr in PROXYMAPS.items():
     p.start()
 
 while True:
-    time.sleep(1337)
+    sleep(1337)
