@@ -2,8 +2,8 @@
 
 import socket
 import errno
-import threading
 import time
+from threading import Thread
 from glob import glob
 from select import select
 
@@ -39,12 +39,12 @@ class Dumper:
             f.write(data)
 
 
-class Proxy(threading.Thread):
+class Proxy(Thread):
     def __init__(self,
                  listen_port, server_host, server_port,
                  listen_ipv6=True):
 
-        threading.Thread.__init__(self, name='port' + str(listen_port))
+        Thread.__init__(self, name='port' + str(listen_port))
 
         server_addrs = socket.getaddrinfo(server_host, server_port,
                                           0, socket.SOCK_STREAM)
@@ -130,79 +130,69 @@ class Proxy(threading.Thread):
                         want_write.remove(s)
                 continue
 
+            if proxy in ready_read:
+                # there was a new connect to proxy
+                client, address = proxy.accept()
+                client.setblocking(0)
+
+                server = socket.socket(self.server_family,
+                                       self.server_socktype)
+                server.setblocking(0)
+
+                try:
+                    server.connect(self.server_sockaddr)
+                except socket.error as E:
+                    if E.errno == errno.EINPROGRESS or E.errno == 10035:
+                        pass  # it is normal to have EINPROGRESS here
+                    else:
+                        client.close()
+                        server.close()
+                        continue
+
+                socket_to_dumper[server] = Dumper(self.listen_port)
+
+                data_to_send[client] = b''
+                data_to_send[server] = b''
+
+                socket_pairs.add_pair(client, server)
+
+                client_sockets.add(client)
+                server_sockets.add(server)
+
+                want_read.append(client)
+                want_read.append(server)
+
+                print("Connect to port %s from %s" %
+                      (self.listen_port, address))
+
             for s in ready_read:
-                if s == proxy:  # there is a new connect to proxy
-                    client, address = proxy.accept()
-                    client.setblocking(0)
-                    client_sockets.add(client)
+                if s == proxy:
+                    continue  # handled above
+                s_pair = socket_pairs.get_pair(s)
+                try:
+                    data = s.recv(65536)
+                except:
+                    s_pair.close()
+                    break
 
-                    server = socket.socket(self.server_family,
-                                           self.server_socktype)
-                    server.setblocking(0)
-                    server_sockets.add(server)
+                if data:
+                    if s in server_sockets:
+                        socket_to_dumper[s].dump(data)
+                    data_to_send[s_pair] += data
+                    want_write.append(s_pair)
+                else:  # connection was closed
+                    want_read.remove(s)  # don't want to read from it
+                    if s_pair in want_read:
+                        want_read.remove(s_pair)
 
-                    data_to_send[client] = b''
-                    data_to_send[server] = b''
-
-                    socket_pairs.add_pair(client, server)
-
-                    try:
-                        server.connect(self.server_sockaddr)
-                    except socket.error as E:
-                        if E.errno == errno.EINPROGRESS or E.errno == 10035:
-                            pass  # it is normal to have EINPROGRESS here
-                        else:
-                            client.close()
-                            server.close()
-                            continue
-
-                    socket_to_dumper[server] = Dumper(self.listen_port)
-
-                    want_read.append(server)
-                    want_read.append(client)  # want an want_read from client
-
-                    print("Connect port %s" % self.listen_port)
-
-            for s in ready_read:
-                if s != proxy:  # usual socket
-                    s_pair = socket_pairs.get_pair(s)
-                    try:
-                        data = s.recv(4096)
-                    except:
-                        s_pair.close()
-                        break
-
-                    if data:
-                        if s in server_sockets:
-                            socket_to_dumper[s].dump(data)
-                        data_to_send[s_pair] += data
+                    if s in server_sockets and data_to_send[s_pair]:
+                        closed_but_data_left_sockets.add(s_pair)
                         want_write.append(s_pair)
-                    else:  # connection was closed
-                        if s in server_sockets:
-                            client = s_pair
-
-                            want_read.remove(s)
-                            if client in want_read:
-                                want_read.remove(client)
-
-                            if data_to_send[client]:
-                                closed_but_data_left_sockets.add(client)
-                                want_write.append(client)
-                                client.shutdown(socket.SHUT_RD)
-                            else:
-                                client.close()
-
-                            s.close()
-                        else:
-                            server = s_pair
-
-                            want_read.remove(s)
-                            if server in want_read:
-                                want_read.remove(server)
-
-                            server.close()
-                            s.close()
-                        break
+                        s_pair.shutdown(socket.SHUT_RD)
+                    else:
+                        s_pair.close()
+                    s.close()
+                    break
 
             for s in ready_write:
                 if not data_to_send[s]:
