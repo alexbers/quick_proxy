@@ -108,7 +108,7 @@ class Proxy(Thread):
             try:
                 want_read = set([proxy]) | client_sockets | server_sockets
                 have_out_data = [s for s in data_to_send if data_to_send[s]]
-                want_write = set(have_out_data) | closed_but_data_left_sockets
+                want_write = set(have_out_data)
 
                 ready_read, ready_write = select(want_read, want_write,
                                                  [], 10)[:2]
@@ -120,6 +120,7 @@ class Proxy(Thread):
                     except:
                         client_sockets.discard(s)
                         server_sockets.discard(s)
+                        data_to_send[s] = b''
 
                 for s in want_write:
                     try:
@@ -127,6 +128,7 @@ class Proxy(Thread):
                     except:
                         client_sockets.discard(s)
                         server_sockets.discard(s)
+                        data_to_send[s] = b''
                 continue
 
             # handling a new connect to the proxy
