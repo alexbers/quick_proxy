@@ -2,12 +2,13 @@
 
 import socket
 import errno
+import re
 from time import sleep
 from threading import Thread
 from glob import glob
 from select import select
 
-from config import PROXYMAPS
+from config import PROXYMAPS, FILTER_WINDOW_SIZE, FILTER_RE
 
 
 class SocketPairs:
@@ -80,6 +81,7 @@ class Proxy(Thread):
         socket_pairs = SocketPairs()
         closed_but_data_left_sockets = set()
         data_to_send = {}
+        data_to_filter = {}
         socket_to_dumper = {}
 
         proxy.listen(10)
@@ -100,6 +102,10 @@ class Proxy(Thread):
             for s in list(data_to_send):
                 if s not in vaild_sockets:
                     del data_to_send[s]
+
+            for s in list(data_to_filter):
+                if s not in vaild_sockets:
+                    del data_to_filter[s]
 
             for s in list(socket_to_dumper):
                 if s not in vaild_sockets:
@@ -154,8 +160,11 @@ class Proxy(Thread):
 
                 socket_pairs.add_pair(client, server)
 
-                data_to_send[client] = b''
-                data_to_send[server] = b''
+                data_to_send[client]   = b''
+                data_to_send[server]   = b''
+
+                data_to_filter[client] = b''
+                data_to_filter[server] = b''
 
                 client_sockets.add(client)
                 server_sockets.add(server)
@@ -177,6 +186,18 @@ class Proxy(Thread):
                 if data:
                     if s in server_sockets:
                         socket_to_dumper[s].dump(data)
+
+                    # check if to filter data out
+                    data_to_filter[s] += data
+
+                    for pattern in FILTER_RE:
+                        if re.search(pattern, data_to_filter[s]):
+                            print("Connection dropped at pattern %s" % pattern)
+                            s.close()
+                            s_pair.close()
+
+                    data_to_filter[s] = data_to_filter[s][-FILTER_WINDOW_SIZE:]
+
                     data_to_send[s_pair] += data
                 else:  # connection was closed
                     if s in server_sockets and data_to_send[s_pair]:

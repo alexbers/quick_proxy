@@ -5,3 +5,10 @@ PROXYMAPS = {
     3456 : ("dc21:c7f:2012:6::10", 22),
     4433 : ("alexbers.dyndns.org", 22)
 }
+
+FILTER_WINDOW_SIZE = 64
+
+FILTER_RE = [
+#    b"table?",
+#    b"bay"
+]
