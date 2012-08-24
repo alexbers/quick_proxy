@@ -7,8 +7,9 @@ from time import sleep
 from threading import Thread
 from glob import glob
 from select import select
+from imp import reload
 
-from config import PROXYMAPS, FILTER_WINDOW_SIZE, FILTER_RE
+import config
 
 
 class SocketPairs:
@@ -190,13 +191,15 @@ class Proxy(Thread):
                     # check if to filter data out
                     data_to_filter[s] += data
 
-                    for pattern in FILTER_RE:
+                    for pattern in config.FILTER_RE:
                         if re.search(pattern, data_to_filter[s]):
                             print("Connection dropped at pattern %s" % pattern)
                             s.close()
                             s_pair.close()
 
-                    data_to_filter[s] = data_to_filter[s][-FILTER_WINDOW_SIZE:]
+                    data_to_filter[s] = (
+                        data_to_filter[s][-config.FILTER_WINDOW_SIZE:]
+                    )
 
                     data_to_send[s_pair] += data
                 else:  # connection was closed
@@ -227,11 +230,12 @@ class Proxy(Thread):
 
                 data_to_send[s] = data_to_send[s][sent:]
 
-for listen_port, sockaddr in PROXYMAPS.items():
+for listen_port, sockaddr in config.PROXYMAPS.items():
     server_host, server_port = sockaddr
     p = Proxy(listen_port, server_host, server_port)
     p.daemon = True
     p.start()
 
 while True:
-    sleep(1337)
+    sleep(5)
+    reload(config)
