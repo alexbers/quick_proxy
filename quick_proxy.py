@@ -238,4 +238,8 @@ for listen_port, sockaddr in config.PROXYMAPS.items():
 
 while True:
     sleep(5)
-    reload(config)
+    try:
+        import config
+        reload(config)
+    except Exception as E:
+        print("Reload failed: %s" % E)
