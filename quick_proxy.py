@@ -44,7 +44,7 @@ class Dumper:
 class Proxy(Thread):
     def __init__(self,
                  listen_port, server_host, server_port,
-                 listen_ipv6=True):
+                 listen_ipv6=False):
 
         Thread.__init__(self, name='port' + str(listen_port))
 
